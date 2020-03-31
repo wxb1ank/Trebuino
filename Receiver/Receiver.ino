@@ -15,7 +15,6 @@
 
 /* DISABLE IN PRODUCTION */
 //#define __MEG_DEBUG__
-//#define VERBOSE_LOG
 //#define NO_SLEEP_ON_FATAL
 //#define PREFLIGHT
 //#define NO_BLUETOOTH
