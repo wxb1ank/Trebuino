@@ -286,7 +286,7 @@ void launch() {
 	#endif // NO_BLUETOOTH
 
 	#ifdef __MEG_DEBUG__
-	char *tmp = (char *)malloc(sizeof(unsigned long));
+	const char *tmp = (const char *)malloc(sizeof(unsigned long));
 	sprintf(tmp, " (%lums)\n", millis() - start);
 	Serial.print(tmp);
 	free(tmp);
