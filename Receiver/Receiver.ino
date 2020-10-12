@@ -5,38 +5,34 @@
  * AUTHOR:   wxblank
  *
  * DESCRIPTION:
- * 		Configures Bluetooth services, detects launch signals,
- * 		controls the motor upon launch, and provides a debugging
- * 		interface over serial.
+ *     Configures Bluetooth services, detects a launch signal,
+ *     controls the motor upon launch, and provides a serial
+ *     interface.
  *
  */
 
 #include <Arduino.h>
-#include <LowPower.h>
+#include <SoftwareSerial.h>
 #include <SPI.h>
 
+/* Adafruit BluefruitLE nrF51 <https://github.com/adafruit/Adafruit_BluefruitLE_nRF51> */
 #include <Adafruit_BLE.h>
 #include <Adafruit_BluefruitLE_SPI.h>
 
+/* Rocketscream Low-Power <https://github.com/rocketscream/Low-Power> */
+#include <LowPower.h>
+
 #include "BluefruitConfig.h"
 
-#define PIN_MOTOR         2
-/*      BLUEFRUIT_SPI_RST 4 */
-/*      BLUEFRUIT_SPI_CS  7 */
-/*      BLUEFRUIT_SPI_IRQ 8 */
+#define PIN_MOTOR 2
 
-#define BLE_NAME             "Meg Trebuchet"
-#define BLE_SERVICE_UUID     "57-69-6c-6c-2b-48-75-6e-74-65-72-2b-45-76-61-6e"
-#define BLE_DATA             "02-01-06-11-06-6e-61-76-45-2b-72-65-74-6e-75-48-2b-6c-6c-69-57"
+#define BLE_SERVICE_STR(uuid) "UUID128=" uuid
+#define BLE_CHAR_STR(uuid, properties, min_len, value, description) "UUID=" uuid ",PROPERTIES=" properties ",MIN_LEN=" min_len ",VALUE=" value ",DESCRIPTION=" description
 
-#define BLE_CHAR_UUID        "0x0001"
-#define BLE_CHAR_PROPERTIES  "0x10"
-#define BLE_CHAR_MIN_LEN     "1"
-#define BLE_CHAR_VALUE       "0"
-#define BLE_CHAR_DESCRIPTION "is_launching"
-
-#define serviceString(uuid) "UUID128=" uuid
-#define characteristicString(uuid, properties, min_len, value, description) "UUID=" uuid ",PROPERTIES=" properties ",MIN_LEN=" min_len ",VALUE=" value ",DESCRIPTION=" description
+#define BLE_DEFAULT_NAME    "Meg Trebuchet"
+#define BLE_DEFAULT_SERVICE BLE_SERVICE_STR("57-69-6c-6c-2b-48-75-6e-74-65-72-2b-45-76-61-6e")
+#define BLE_DEFAULT_CHAR    BLE_CHAR_STR("0x0001", "0x10", "1", "0", "is_launching")
+#define BLE_DEFAULT_DATA    "02-01-06-11-06-6e-61-76-45-2b-72-65-74-6e-75-48-2b-6c-6c-69-57"
 
 #define BLE_AT_NAME    "AT+GAPDEVNAME="
 #define BLE_AT_SERVICE "AT+GATTADDSERVICE="
@@ -45,24 +41,21 @@
 #define BLE_AT_ADV     "AT+GAPSTARTADV"
 #define BLE_AT_NOTIFY  "AT+GATTCHAR="
 
-Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_CS, BLUEFRUIT_SPI_IRQ, BLUEFRUIT_SPI_RST);
+#define BLINK_BLUEFRUIT           2
+#define BLINK_FACTORY_RESET       4
+#define BLINK_SET_NAME            6
+#define BLINK_ADD_SERVICE         8
+#define BLINK_ADD_CHARACTERISTIC 10
+#define BLINK_SET_DATA           12
 
-enum {
-	kBlinkBluefruit,
-	kBlinkFactoryReset,
-	kBlinkSetName,
-	kBlinkAddService,
-	kBlinkAddCharacteristic,
-	kBlinkSetData
-};
+Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_CS, BLUEFRUIT_SPI_IRQ, BLUEFRUIT_SPI_RST);
 
 static int32_t serviceId     = 0;
 static int32_t isLaunchingId = 0;
 
-#define sleep() \
-	do { \
-		LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF); \
-	} while(0)
+static inline void sleep(void) {
+	LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
+}
 
 static void blink(unsigned amount) {
 	for(unsigned i = 0; i < amount; i++) {
@@ -78,7 +71,7 @@ static void initBluetooth(void) {
 
 	if(!ble.begin(VERBOSE_MODE)) {
 		Serial.println(F("\n[!] Couldn't connect to Bluefruit!"));
-		blink(kBlinkBluefruit);
+		blink(BLINK_BLUEFRUIT);
 		sleep();
 	}
 
@@ -92,71 +85,67 @@ static void factoryReset(void) {
 
 	if(!ble.factoryReset()) {
 		Serial.println(F("\n[!] Couldn't perform factory reset!"));
-		blink(kBlinkFactoryReset);
+		blink(BLINK_FACTORY_RESET);
 		sleep();
 	}
 
 	Serial.println(F(" done!"));
 }
 
-static void setName(const char *name) {
+static void setName(void) {
 	Serial.print(F(">> Changing Bluetooth name..."));
 	
-	ble.print(BLE_AT_NAME);
-	ble.println(name);
+	ble.println(F(BLE_AT_NAME BLE_DEFAULT_NAME));
 
 	if(!ble.waitForOK()) {
-		Serial.println(F("\n[!] Couldn't change Bluetooth name!"));
-		blink(kBlinkSetName);
+		Serial.println(F("\n[!] Couldn't set Bluetooth name!"));
+		blink(BLINK_SET_NAME);
 		sleep();
 	}
 
 	Serial.println(F(" done!"));
 }
 
-static void addService(const char *service, int32_t *id) {
+static void addService(void) {
 	Serial.print(F(">> Adding trebuchet service..."));
 
-	ble.print(BLE_AT_UUID);
-	ble.println(service);
+	ble.println(F(BLE_AT_SERVICE BLE_DEFAULT_SERVICE));
 
 	if(!ble.waitForOK()) {
 		Serial.println(F("\n[!] Couldn't add trebuchet service!"));
-		blink(kBlinkAddService);
+		blink(BLINK_ADD_SERVICE);
 		sleep();
 	}
 
-	*id = ble.readline_parseInt();
+	serviceId = ble.readline_parseInt();
 
 	Serial.println(F(" done!"));
 }
 
-static void addCharacteristic(const char *characteristic, int32_t *id) {
+static void addCharacteristic(void) {
 	Serial.print(F(">> Adding service characteristic..."));
 
-	ble.print(BLE_AT_CHAR);
-	ble.println(characteristic);
+	ble.println(F(BLE_AT_CHAR BLE_DEFAULT_CHAR));
 
 	if(!ble.waitForOK()) {
 		Serial.println(F("\n[!] Couldn't add service characteristic!"));
-		blink(kBlinkAddCharacteristic);
+		blink(BLINK_ADD_CHARACTERISTIC);
 		sleep();
 	}
 
-	*id = ble.readline_parseInt();
+	isLaunchingId = ble.readline_parseInt();
 
 	Serial.println(F(" done!"));
 }
 
-static void setData(const char *data) {
+static void setData(void) {
 	Serial.print(F(">> Setting advertising data..."));
 	
-	ble.print(BLE_AT_DATA);
-	ble.println(data);
+	ble.println(F(BLE_AT_DATA BLE_DEFAULT_DATA));
 
 	if(!ble.waitForOK()) {
 		Serial.println(F("\n[!] Couldn't set advertising data!"));
-		blink(kBlinkSetData);
+		blink(BLINK_SET_DATA);
 		sleep();
 	}
 
@@ -164,21 +153,21 @@ static void setData(const char *data) {
 }
 
 static void launch(void) {
-	Serial.print(F(">> Launching!"));
+	Serial.println(F(">> Launching!"));
 	digitalWrite(LED_BUILTIN, HIGH);
 
-	ble.print(BLE_AT_NOTIFY);
+	ble.print(F(BLE_AT_NOTIFY));
 	ble.print(isLaunchingId);
-	ble.println(",1");
+	ble.println(F(",1"));
 	
 	digitalWrite(PIN_MOTOR, HIGH);
 	delay(200);
 	digitalWrite(PIN_MOTOR, LOW);
 	delay(500);
 
-	ble.print(BLE_AT_NOTIFY);
+	ble.print(F(BLE_AT_NOTIFY));
 	ble.print(isLaunchingId);
-	ble.println(",0");
+	ble.println(F(",0"));
 
 	digitalWrite(LED_BUILTIN, LOW);
 }
@@ -192,19 +181,14 @@ void setup() {
 	initBluetooth();
 	factoryReset();
 
-	setName(BLE_NAME);
-	addService(serviceString(BLE_SERVICE_UUID), &serviceId);
-	addCharacteristic(characteristicString(BLE_CHAR_UUID,
-	                                       BLE_CHAR_PROPERTIES
-	                                       BLE_CHAR_MIN_LEN
-	                                       BLE_CHAR_VALUE
-	                                       BLE_CHAR_DESCRIPTION),
-	                  &isLaunchingId);
-	setData(BLE_DATA);
+	setName();
+	addService();
+	addCharacteristic();
+	setData();
 
 	ble.reset();
 
-	ble.println(BLE_AT_ADV);
+	ble.println(F(BLE_AT_ADV));
 	ble.waitForOK();
 
 	Serial.println(F(">> Retrieving Bluefruit info..."));
@@ -218,18 +202,14 @@ void setup() {
 	pinMode(PIN_MOTOR, OUTPUT);
 
 	Serial.println();
-
-	while(!ble.isConnected()) {
-		delay(500);
-	}
 }
 
 void loop() {
 	if(ble.isConnected()) {
-		if(ble.read() == 'L') {
+		if((ble.read() == 'G') && (ble.read() == 'O')) {
 			launch();
-
-			delay(50);
 		}
 	}
+
+	delay(50);
 }
